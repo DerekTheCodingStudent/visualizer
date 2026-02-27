@@ -30,24 +30,29 @@ interface ChartDefinition {
 
 const VS_SOURCE = `
 attribute vec2 a_position;
+attribute vec4 a_color;
+
 uniform vec2 u_resolution;
 uniform vec2 u_translation;
 uniform float u_scale;
 
+varying vec4 v_color;
 void main() {
-  vec2 center = u_resolution / 2.0;
-  vec2 position = (a_position - center + u_translation) * u_scale + center;
-  vec2 zeroToOne = position / u_resolution;
-  vec2 clipSpace = (zeroToOne * 2.0) - 1.0;
-  gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+  vec2 position = (a_position + u_translation) * u_scale;
+
+  vec2 zeroToOne = (position + u_resolution / 2.0) / u_resolution;
+  vec2 clipSpace = zeroToOne * 2.0 - 1.0;
+
+  gl_Position = vec4(clipSpace * vec2(1.0, -1.0), 0.0, 1.0);
+  v_color = a_color;
 }
 `;
 
 const FS_SOURCE = `
 precision mediump float;
-uniform vec4 u_color;
+varying vec4 v_color;
 void main() {
-  gl_FragColor = u_color;
+  gl_FragColor = v_color;
 }
 `;
 
@@ -60,6 +65,10 @@ const BarChart: React.FC = () => {
   const glRef = useRef<WebGLRenderingContext | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
   const bufferRef = useRef<WebGLBuffer | null>(null);
+  const vertexCountRef = useRef(0);
+  const borderVertexCountRef = useRef(0);
+
+  const borderBufferRef = useRef<WebGLBuffer | null>(null);
 
   const [bars, setBars] = useState<BarData[]>([]);
   const [legend, setLegend] = useState<LegendItem[]>([]);
@@ -99,6 +108,9 @@ const BarChart: React.FC = () => {
     };
 
     reader.readAsText(file);
+
+    generateGeometry();
+    generateBorderBuffer();
   };
 
   /* ================================
@@ -134,6 +146,83 @@ const BarChart: React.FC = () => {
     bufferRef.current = gl.createBuffer();
   }, []);
 
+  // generate bar graph data
+  const generateGeometry = useCallback(() => {
+    console.log("running geometry");
+    const gl = glRef.current;
+    const buffer = bufferRef.current;
+    if (!gl || !buffer) return;
+
+    const vertexData: number[] = [];
+
+    bars.forEach((bar) => {
+      const total = bar.segments.reduce((a, b) => a + b, 0);
+      if (total === 0) return;
+
+      let accumulatedHeight = 0;
+
+      bar.segments.forEach((value, i) => {
+        const segmentHeight = (value / total) * bar.h;
+
+        const x1 = bar.x;
+        const x2 = bar.x + bar.w;
+
+        const yTop = bar.y - accumulatedHeight;
+        const yBottom = bar.y - accumulatedHeight - segmentHeight;
+
+        const color = legend[i]?.color ?? [1, 1, 1, 1];
+
+        // 2 triangles per segment
+        vertexData.push(
+          x1, yTop,    ...color,
+          x2, yTop,    ...color,
+          x1, yBottom, ...color,
+
+          x1, yBottom, ...color,
+          x2, yTop,    ...color,
+          x2, yBottom, ...color
+        );
+
+        accumulatedHeight += segmentHeight;
+      });
+    });
+
+    const floatData = new Float32Array(vertexData);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, floatData, gl.STATIC_DRAW);
+
+    vertexCountRef.current = floatData.length / 6; // 6 floats per vertex
+  }, [bars, legend]);
+
+  //
+  // generate border buffer
+  //
+  const generateBorderBuffer = useCallback(() => {
+    const gl = glRef.current;
+    if (!gl) return;
+
+    const borderBuffer = gl.createBuffer();
+    borderBufferRef.current = borderBuffer;
+
+    const cx = 0;
+    const cy = 0;
+
+    const borderColor = [0.4, 0.4, 0.4, 1];
+
+    const data = new Float32Array([
+      cx - 300, cy + 100, ...borderColor,
+      cx + 300, cy + 100, ...borderColor,
+      cx + 300, cy - 200, ...borderColor,
+      cx - 300, cy - 200, ...borderColor,
+    ]);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, borderBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+
+    borderVertexCountRef.current = 4;
+  }, []);
+
   /* ================================
      Draw Function
   ================================ */
@@ -143,8 +232,9 @@ const BarChart: React.FC = () => {
     const gl = glRef.current;
     const program = programRef.current;
     const buffer = bufferRef.current;
+    const borderBuffer = borderBufferRef.current;
 
-    if (!canvas || !gl || !program || !buffer) return;
+    if (!canvas || !gl || !program || !buffer || !borderBuffer) return;
 
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -156,83 +246,82 @@ const BarChart: React.FC = () => {
     gl.useProgram(program);
 
     const positionLoc = gl.getAttribLocation(program, "a_position");
+    const colorLoc = gl.getAttribLocation(program, "a_color");
+
     const resLoc = gl.getUniformLocation(program, "u_resolution");
     const transLoc = gl.getUniformLocation(program, "u_translation");
     const scaleLoc = gl.getUniformLocation(program, "u_scale");
-    const colorLoc = gl.getUniformLocation(program, "u_color");
-
-    gl.enableVertexAttribArray(positionLoc);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
 
     gl.uniform2f(resLoc, canvas.width, canvas.height);
     gl.uniform2f(transLoc, translation.x, translation.y);
     gl.uniform1f(scaleLoc, scale);
 
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
+    const stride = 6 * 4; // 6 floats per vertex
+
+    /* ===== Draw Bars ===== */
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+    gl.enableVertexAttribArray(positionLoc);
+    gl.vertexAttribPointer(
+      positionLoc,
+      2,
+      gl.FLOAT,
+      false,
+      stride,
+      0
+    );
+
+    gl.enableVertexAttribArray(colorLoc);
+    gl.vertexAttribPointer(
+      colorLoc,
+      4,
+      gl.FLOAT,
+      false,
+      stride,
+      2 * 4
+    );
+
+    gl.drawArrays(gl.TRIANGLES, 0, vertexCountRef.current);
 
     /* ===== Draw Border ===== */
-    gl.uniform4f(colorLoc, 0.4, 0.4, 0.4, 1.0);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([
-        cx - 300, cy + 100,
-        cx + 300, cy + 100,
-        cx + 300, cy - 200,
-        cx - 300, cy - 200
-      ]),
-      gl.STATIC_DRAW
+    gl.bindBuffer(gl.ARRAY_BUFFER, borderBuffer);
+
+    gl.vertexAttribPointer(
+      positionLoc,
+      2,
+      gl.FLOAT,
+      false,
+      stride,
+      0
     );
-    gl.drawArrays(gl.LINE_LOOP, 0, 4);
 
-    /* ===== Draw Stacked Bars ===== */
-    bars.forEach((bar) => {
-      const total = bar.segments.reduce((a, b) => a + b, 0);
-      if (total === 0) return;
+    gl.vertexAttribPointer(
+      colorLoc,
+      4,
+      gl.FLOAT,
+      false,
+      stride,
+      2 * 4
+    );
 
-      let accumulatedHeight = 0;
+    gl.drawArrays(gl.LINE_LOOP, 0, borderVertexCountRef.current);
 
-      bar.segments.forEach((value, i) => {
-        const segmentHeight = (value / total) * bar.h;
+  }, [scale, translation]);
 
-        const x1 = bar.x + cx;
-        const x2 = bar.x + bar.w + cx;
+  useEffect(() => {
+    generateGeometry();
+    generateBorderBuffer();
+  }, [generateGeometry, generateBorderBuffer]);
 
-        const yTop = bar.y - accumulatedHeight + cy;
-        const yBottom = bar.y - accumulatedHeight - segmentHeight + cy;
-
-        gl.bufferData(
-          gl.ARRAY_BUFFER,
-          new Float32Array([
-            x1, yTop,
-            x2, yTop,
-            x1, yBottom,
-            x1, yBottom,
-            x2, yTop,
-            x2, yBottom
-          ]),
-          gl.STATIC_DRAW
-        );
-
-        const color = legend[i]?.color ?? [1, 1, 1, 1];
-        gl.uniform4f(colorLoc, color[0], color[1], color[2], color[3]);
-
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        accumulatedHeight += segmentHeight;
-      });
-    });
-  }, [bars, legend, scale, translation]);
+  useEffect(() => {
+    generateGeometry();
+  }, [generateGeometry]);
 
   useEffect(() => {
     draw();
   }, [draw]);
 
-  useEffect(() => {
-    window.addEventListener("resize", draw);
-    return () => window.removeEventListener("resize", draw);
-  }, [draw]);
+  console.log("Vertex Count:", vertexCountRef.current);
 
   /* ================================
      Zoom Handling
