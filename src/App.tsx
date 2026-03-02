@@ -76,6 +76,7 @@ const BarChart: React.FC = () => {
   const [translation, setTranslation] = useState({ x: 0, y: 0 });
   const [showLegend, setShowLegend] = useState(false);
   const [uiVisible, setUiVisible] = useState(true);
+  const [culling, setCulling] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
@@ -268,14 +269,16 @@ const BarChart: React.FC = () => {
       // Partial intersection -> either dive into children or check leaf indices individually
       if (node.children) {
         node.children.forEach(visit);
-      } else {
+      } 
+      if(node.indices) {
         // node is leaf: check each stored quad against the view
         for (const idx of node.indices) {
           const q = baseQuads[idx];
           if (rectIntersects(viewRect, { x: q.x, y: q.y, w: q.w, h: q.h })) out.push(idx);
         }
       }
-    }
+
+      }
 
     function collectAllLeafIndices(node: QuadNode) {
       if (node.children) {
@@ -307,7 +310,7 @@ const BarChart: React.FC = () => {
   }
 
   const updateIndexBufferFromCulling = useCallback((
-    width, height
+    width: number, height: number
   ) => {
     const gl = glRef.current;
     const indexBuffer = indexBufferRef.current;
@@ -323,14 +326,12 @@ const BarChart: React.FC = () => {
       scale
     );
 
-    // For now, don't cull
-    //const visibleQuadIndices = queryVisibleIndices(
-    //  quadtree,
-    //  baseQuads,
-    //  viewRect
-    //);
-
-    const visibleQuadIndices = baseQuads.map((_, i) => i);
+    const visibleQuadIndices = culling ? queryVisibleIndices(
+      quadtree,
+      baseQuads,
+      viewRect
+    ) 
+    : baseQuads.map((_, i) => i);
 
     const indexData: number[] = [];
 
@@ -617,6 +618,12 @@ const BarChart: React.FC = () => {
         e.preventDefault();
         setShowShortcuts(prev => !prev);
       }
+
+      // alt+c -> toggle culling 
+      if(e.altKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        setCulling(prev => !prev);
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -709,7 +716,6 @@ const BarChart: React.FC = () => {
           <input type="file" accept=".json" onChange={handleFileUpload} />
           <button
             onClick={() => {
-              //if (!hasValidData) return;
               setShowLegend(prev => !prev);
             }}
             disabled={!hasValidData}
@@ -720,6 +726,9 @@ const BarChart: React.FC = () => {
 
           <div className="zoom-indicator">
             ZOOM: {scale.toFixed(2)}x
+          </div>
+          <div className="culling-indicator">
+            CULLING: {culling ? "ON" : "OFF"}
           </div>
 
           <button
@@ -761,6 +770,7 @@ const BarChart: React.FC = () => {
           <div className="shortcuts-title">Keyboard Shortcuts</div>
           <div>alt + K → Toggle UI</div>
           <div>alt + M → Toggle Help</div>
+          <div>alt + c → Toggle culling</div>
           <div>Mouse Wheel → Zoom</div>
         </div>
       )}
