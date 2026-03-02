@@ -306,7 +306,9 @@ const BarChart: React.FC = () => {
     return { x: left, y: top, w: right - left, h: bottom - top };
   }
 
-  const updateIndexBufferFromCulling = useCallback(() => {
+  const updateIndexBufferFromCulling = useCallback((
+    width, height
+  ) => {
     const gl = glRef.current;
     const indexBuffer = indexBufferRef.current;
     const baseQuads = baseQuadsRef.current;
@@ -316,16 +318,19 @@ const BarChart: React.FC = () => {
     if (!gl || !indexBuffer || !quadtree || !canvas) return;
 
     const viewRect = computeViewRect(
-      { x: canvas.width, y: canvas.height },
+      { x: width, y: height },
       translation,
       scale
     );
 
-    const visibleQuadIndices = queryVisibleIndices(
-      quadtree,
-      baseQuads,
-      viewRect
-    );
+    // For now, don't cull
+    //const visibleQuadIndices = queryVisibleIndices(
+    //  quadtree,
+    //  baseQuads,
+    //  viewRect
+    //);
+
+    const visibleQuadIndices = baseQuads.map((_, i) => i);
 
     const indexData: number[] = [];
 
@@ -476,7 +481,7 @@ const BarChart: React.FC = () => {
 
     const stride = 6 * 4; // 6 floats per vertex
 
-    updateIndexBufferFromCulling();
+    updateIndexBufferFromCulling(canvas.width, canvas.height);
 
     /* ===== Draw Bars ===== */
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
