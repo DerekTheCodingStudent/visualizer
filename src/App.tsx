@@ -79,6 +79,10 @@ const BarChart: React.FC = () => {
   const [showShortcuts, setShowShortcuts] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+  const indexBufferRef = useRef<WebGLBuffer | null>(null);
+  const indexCountRef = useRef<number>(0);
+  const baseQuadsRef = useRef<Quad[]>([]);
+  const quadtreeRef = useRef<QuadNode | null>(null);
 
   /* ================================
      File Upload
@@ -123,7 +127,7 @@ const BarChart: React.FC = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const gl = canvas.getContext("webgl");
+    const gl = canvas.getContext("webgl2");
     if (!gl) return;
 
     glRef.current = gl;
@@ -148,14 +152,213 @@ const BarChart: React.FC = () => {
     bufferRef.current = gl.createBuffer();
   }, []);
 
+  // Types
+  type Quad = { x: number; y: number; w: number; h: number; color?: [number,number,number,number] };
+  type Rect = { x: number; y: number; w: number; h: number };
+
+  // Utility : AABB intersection / containment
+  function rectIntersects(a: Rect, b: Rect) {
+    return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
+  }
+  function rectContains(a: Rect, b: Rect) {
+    // does A fully contain B?
+    return a.x <= b.x && a.y <= b.y && a.x + a.w >= b.x + b.w && a.y + a.h >= b.y + b.h;
+  }
+
+  // Quadtree node
+  class QuadNode {
+    bounds: Rect;
+    indices: number[] = [];      // indices of base quads that are stored in this node
+    children: QuadNode[] | null = null;
+    depth: number;
+
+    constructor(bounds: Rect, depth = 0) {
+      this.bounds = bounds;
+      this.depth = depth;
+    }
+  }
+
+  // Build quadtree from base quads array
+  function buildQuadTree(baseQuads: Quad[], options?: {
+    maxDepth?: number; capacity?: number; rootBounds?: Rect;
+  }) {
+    const maxDepth = options?.maxDepth ?? 10;
+    const capacity = options?.capacity ?? 8;
+
+    // compute root bounds if not provided
+    let rootBounds = options?.rootBounds;
+    if (!rootBounds) {
+      if (baseQuads.length === 0) rootBounds = { x: 0, y: 0, w: 0, h: 0 };
+      else {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        baseQuads.forEach(q => {
+          minX = Math.min(minX, q.x);
+          minY = Math.min(minY, q.y);
+          maxX = Math.max(maxX, q.x + q.w);
+          maxY = Math.max(maxY, q.y + q.h);
+        });
+        rootBounds = { x: minX, y: minY, w: Math.max(1e-6, maxX - minX), h: Math.max(1e-6, maxY - minY) };
+      }
+    }
+
+    const root = new QuadNode(rootBounds, 0);
+
+    function subdivide(node: QuadNode) {
+      const { x, y, w, h } = node.bounds;
+      const hw = w / 2;
+      const hh = h / 2;
+      node.children = [
+        new QuadNode({ x: x,     y: y,     w: hw, h: hh }, node.depth + 1), // top-left
+        new QuadNode({ x: x+hw,  y: y,     w: hw, h: hh }, node.depth + 1), // top-right
+        new QuadNode({ x: x,     y: y+hh,  w: hw, h: hh }, node.depth + 1), // bottom-left
+        new QuadNode({ x: x+hw,  y: y+hh,  w: hw, h: hh }, node.depth + 1), // bottom-right
+      ];
+    }
+
+    function tryInsert(node: QuadNode, quadIndex: number) {
+      const quad = baseQuads[quadIndex];
+      const qRect = { x: quad.x, y: quad.y, w: quad.w, h: quad.h };
+
+      // If node has children, attempt to push it down into a single child that fully contains it.
+      if (node.children) {
+        for (const child of node.children) {
+          if (rectContains(child.bounds, qRect)) {
+            tryInsert(child, quadIndex);
+            return;
+          }
+        }
+        // otherwise it does not fully fit into any single child -> keep in current node
+        node.indices.push(quadIndex);
+        return;
+      }
+
+      // if leaf: store
+      node.indices.push(quadIndex);
+
+      // split if capacity exceeded and not at max depth
+      if (node.indices.length > capacity && node.depth < maxDepth) {
+        subdivide(node);
+        // re-distribute
+        const toReinsert = node.indices.slice();
+        node.indices.length = 0;
+        toReinsert.forEach(idx => tryInsert(node, idx));
+      }
+    }
+
+    // Insert all quads
+    for (let i = 0; i < baseQuads.length; i++) tryInsert(root, i);
+
+    return root;
+  }
+
+  // Query: returns indices of baseQuads (only from leaf nodes) that intersect viewRect
+  function queryVisibleIndices(root: QuadNode, baseQuads: Quad[], viewRect: Rect) {
+    const out: number[] = [];
+
+    function visit(node: QuadNode) {
+      if (!rectIntersects(node.bounds, viewRect)) return; // node fully outside
+
+      // If node fully inside view, we can gather all indices in this subtree quickly:
+      if (rectContains(viewRect, node.bounds)) {
+        // collect all indices from leaves under this node without per-quad intersection tests
+        collectAllLeafIndices(node);
+        return;
+      }
+
+      // Partial intersection -> either dive into children or check leaf indices individually
+      if (node.children) {
+        node.children.forEach(visit);
+      } else {
+        // node is leaf: check each stored quad against the view
+        for (const idx of node.indices) {
+          const q = baseQuads[idx];
+          if (rectIntersects(viewRect, { x: q.x, y: q.y, w: q.w, h: q.h })) out.push(idx);
+        }
+      }
+    }
+
+    function collectAllLeafIndices(node: QuadNode) {
+      if (node.children) {
+        node.children.forEach(collectAllLeafIndices);
+      } else {
+        // leaf: add every index (no per-quad test)
+        out.push(...node.indices);
+      }
+    }
+
+    visit(root);
+    // Remove duplicates (just in case) and return
+    return Array.from(new Set(out));
+  }
+
+  // Compute view rectangle in *world* coordinates from uniforms used in vertex shader
+  // Shader does: position' = (pos + u_translation) * u_scale
+  // then position' must be in [-u_resolution/2, u_resolution/2] to be inside the viewport
+  function computeViewRect(u_resolution: {x:number,y:number}, u_translation: {x:number,y:number}, u_scale: number) {
+    const halfW = u_resolution.x / (2 * u_scale);
+    const halfH = u_resolution.y / (2 * u_scale);
+
+    const left = -halfW - u_translation.x;
+    const right = halfW - u_translation.x;
+    const top = -halfH - u_translation.y;
+    const bottom = halfH - u_translation.y;
+
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  }
+
+  const updateIndexBufferFromCulling = useCallback(() => {
+    const gl = glRef.current;
+    const indexBuffer = indexBufferRef.current;
+    const baseQuads = baseQuadsRef.current;
+    const quadtree = quadtreeRef.current;
+    const canvas = canvasRef.current;
+
+    if (!gl || !indexBuffer || !quadtree || !canvas) return;
+
+    const viewRect = computeViewRect(
+      { x: canvas.width, y: canvas.height },
+      translation,
+      scale
+    );
+
+    const visibleQuadIndices = queryVisibleIndices(
+      quadtree,
+      baseQuads,
+      viewRect
+    );
+
+    const indexData: number[] = [];
+
+    visibleQuadIndices.forEach((quadIndex) => {
+      const baseVertex = quadIndex * 6;
+
+      indexData.push(
+        baseVertex + 0,
+        baseVertex + 1,
+        baseVertex + 2,
+        baseVertex + 3,
+        baseVertex + 4,
+        baseVertex + 5
+      );
+    });
+
+    const uintData = new Uint32Array(indexData);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, uintData, gl.DYNAMIC_DRAW);
+
+    indexCountRef.current = uintData.length;
+
+  }, [scale, translation]);
+
   // generate bar graph data
   const generateGeometry = useCallback(() => {
-    console.log("running geometry");
     const gl = glRef.current;
     const buffer = bufferRef.current;
     if (!gl || !buffer) return;
 
     const vertexData: number[] = [];
+    const baseQuads: Quad[] = [];
 
     bars.forEach((bar) => {
       const total = bar.segments.reduce((a, b) => a + b, 0);
@@ -174,7 +377,16 @@ const BarChart: React.FC = () => {
 
         const color = legend[i]?.color ?? [1, 1, 1, 1];
 
-        // 2 triangles per segment
+        // Store quad for quadtree
+        baseQuads.push({
+          x: x1,
+          y: yBottom,
+          w: x2 - x1,
+          h: yTop - yBottom,
+          color,
+        });
+
+        // Push 6 vertices (static order)
         vertexData.push(
           x1, yTop,    ...color,
           x2, yTop,    ...color,
@@ -189,12 +401,16 @@ const BarChart: React.FC = () => {
       });
     });
 
+    baseQuadsRef.current = baseQuads;
+    quadtreeRef.current = buildQuadTree(baseQuads);
+
     const floatData = new Float32Array(vertexData);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
     gl.bufferData(gl.ARRAY_BUFFER, floatData, gl.STATIC_DRAW);
 
-    vertexCountRef.current = floatData.length / 6; // 6 floats per vertex
+    vertexCountRef.current = floatData.length / 6;
+
   }, [bars, legend]);
 
   //
@@ -260,6 +476,8 @@ const BarChart: React.FC = () => {
 
     const stride = 6 * 4; // 6 floats per vertex
 
+    updateIndexBufferFromCulling();
+
     /* ===== Draw Bars ===== */
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
@@ -283,7 +501,20 @@ const BarChart: React.FC = () => {
       2 * 4
     );
 
-    gl.drawArrays(gl.TRIANGLES, 0, vertexCountRef.current);
+    // ALWAYS bind index buffer right before drawing
+  const indexBuffer = indexBufferRef.current;
+  if (!indexBuffer) {
+    console.log("Index buffer is NULL, exiting draw()");
+    return 0;
+  }
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.drawElements(
+      gl.TRIANGLES,
+      indexCountRef.current,
+      gl.UNSIGNED_INT,
+      0
+    );
 
     /* ===== Draw Border ===== */
     gl.bindBuffer(gl.ARRAY_BUFFER, borderBuffer);
@@ -316,14 +547,14 @@ const BarChart: React.FC = () => {
   }, [generateGeometry, generateBorderBuffer]);
 
   useEffect(() => {
-    generateGeometry();
-  }, [generateGeometry]);
-
-  useEffect(() => {
     draw();
   }, [draw]);
 
-  console.log("Vertex Count:", vertexCountRef.current);
+  useEffect(() => {
+    const gl = glRef.current;
+    if (!gl) return;
+    indexBufferRef.current = gl.createBuffer();
+  }, []);
 
   /* ================================
      Zoom Handling
