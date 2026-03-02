@@ -114,3 +114,16 @@ button:disabled {
   border: 1px solid rgba(255,255,255,0.3);
   flex-shrink: 0;
 }
+
+.file-header-label {
+  position: absolute;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.7);
+  border-left: 3px solid #00ffcc;
+  padding: 2px 8px;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: none; 
+}

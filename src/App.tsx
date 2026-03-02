@@ -17,6 +17,7 @@ interface BarData {
   h: number;
   label: string;
   segments: number[];
+  sourceFile?: string;
 }
 
 interface ChartDefinition {
@@ -84,40 +85,56 @@ const BarChart: React.FC = () => {
   const indexCountRef = useRef<number>(0);
   const baseQuadsRef = useRef<Quad[]>([]);
   const quadtreeRef = useRef<QuadNode | null>(null);
+  const [fileLabels, setFileLabels] = useState<{name: string, x: number, y: number}[]>([]);
 
   /* ================================
      File Upload
   ================================ */
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
 
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
+    const allBars: BarData[] = [];
+    const labels: {name: string, x:number, y: number}[] = [];
+    let combinedLegend: LegendItem[] = [];
+    const verticalSpacing = 300; // Offset between datasets
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const text = await file.text();
+      
       try {
-        const parsed: ChartDefinition = JSON.parse(
-          event.target?.result as string
-        );
+        const parsed: ChartDefinition = JSON.parse(text);
+        const currentYOffset = -(i * verticalSpacing);
+        
+        const minX = Math.min(...parsed.bars.map(b => b.x));
+        // Offset the Y position of bars for each subsequent file
+        const offsetBars = parsed.bars.map(bar => ({
+          ...bar,
+          y: bar.y + currentYOffset,
+          sourceFile: file.name
+        }));
 
-        if (!parsed.bars || !parsed.legend) {
-          throw new Error("Invalid chart definition");
-        }
-
-        setBars(parsed.bars);
-        setLegend(parsed.legend);
-        setScale(1);
-        setTranslation({ x: 0, y: 0 });
-      } catch {
-        alert("Invalid JSON format");
+        allBars.push(...offsetBars);
+        labels.push({ name: file.name, x: minX, y: currentYOffset });
+        
+        // Merge legends if they are different (or just take the first)
+        if (i === 0) combinedLegend = parsed.legend;
+        
+      } catch (err) {
+        console.error(`Failed to parse ${file.name}`, err);
       }
-    };
+    }
 
-    reader.readAsText(file);
+    const globalMinX = allBars.length > 0 ? Math.min(...allBars.map(b => b.x)) : 0;
 
-    generateGeometry();
-    generateBorderBuffer();
+
+    setBars(allBars);
+    setLegend(combinedLegend);
+    setFileLabels(labels);
+    setScale(1);
+    setTranslation({ x: -globalMinX + 50, y: 0 });
   };
 
   /* ================================
@@ -548,9 +565,11 @@ const BarChart: React.FC = () => {
   }, [scale, translation]);
 
   useEffect(() => {
-    generateGeometry();
-    generateBorderBuffer();
-  }, [generateGeometry, generateBorderBuffer]);
+    if (bars.length > 0) {
+      generateGeometry();
+      generateBorderBuffer();
+    }
+  }, [bars, legend, generateGeometry, generateBorderBuffer]);
 
   useEffect(() => {
     draw();
@@ -681,6 +700,27 @@ const BarChart: React.FC = () => {
       <canvas ref={canvasRef} />
       {uiVisible && (
         <div className="ui-overlay">
+          {fileLabels.map((file, i) => {
+            const cx = window.innerWidth / 2;
+            const cy = window.innerHeight / 2;
+
+            // Calculate screen coordinates based on zoom and pan
+            const xPos = cx + (file.x + translation.x) * scale;
+            const yPos = cy + (file.y + translation.y) * scale;
+
+            return (
+              <div 
+                key={`file-${i}`} 
+                className="file-header-label" 
+                style={{ 
+                  left: `${xPos}px`, 
+                  top: `${yPos - 100 * scale}px`, // Place 20px above the dataset
+                }}
+              >
+                SOURCE: {file.name}
+              </div>
+            );
+          })}
           {bars.map((bar, i) => {
             // 1. Zoom Threshold: Don't show labels if we are zoomed too far out
             if (scale < 0.8) return null;
@@ -713,7 +753,7 @@ const BarChart: React.FC = () => {
       )}
       {uiVisible && (
         <div className="controls">
-          <input type="file" accept=".json" onChange={handleFileUpload} />
+          <input type="file" accept=".json" multiple onChange={handleFileUpload} />
           <button
             onClick={() => {
               setShowLegend(prev => !prev);
@@ -731,13 +771,14 @@ const BarChart: React.FC = () => {
             CULLING: {culling ? "ON" : "OFF"}
           </div>
 
-          <button
+          <button 
             onClick={() => {
+              const minX = bars.length > 0 ? Math.min(...bars.map(b => b.x)) : 0;
               setScale(1);
-              setTranslation({ x: 0, y: 0 });
+              setTranslation({ x: -minX + 50, y: 0 });
             }}
           >
-            RESET VIEW
+            Reset View
           </button>
 
           {/* Legend */}
