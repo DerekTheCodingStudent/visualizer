@@ -1,4 +1,5 @@
 {
+  "title": "Hello World",
   "legend": [
     { "name": "GPU-only",        "color": [0.1, 0.8, 1.0, 1.0] },
     { "name": "CPU-only",        "color": [1.0, 0.6, 0.1, 1.0] },
