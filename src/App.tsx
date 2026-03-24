@@ -476,165 +476,194 @@ const BarChart: React.FC = () => {
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp} // Stop dragging if mouse leaves window
+            onMouseLeave={handleMouseUp}
             style={{ cursor: isDragging ? "grabbing" : "crosshair" }}
         >
             <canvas ref={canvasRef} />
+
             {uiVisible && (
-                <div className="ui-overlay">
-                    {titles.map((title, i) => {
-                        const cx = window.innerWidth / 2;
-                        const cy = window.innerHeight / 2;
-
-                        const yWorld = -(i * 300) - 200; // slightly above your border (top border = +100)
-
-                        const xPos = cx + translation.x * scale;
-                        const yPos = cy + (yWorld + translation.y) * scale;
-
-                        return (
-                            <div
-                                key={`title-${i}`}
-                                className="chart-title"
-                                style={{
-                                    left: `${xPos}px`,
-                                    top: `${yPos}px`,
-                                }}
-                            >
-                                {title}
-                            </div>
-                        );
-                    })}
-                    {fileLabels.map((file, i) => {
-                        const cx = window.innerWidth / 2;
-                        const cy = window.innerHeight / 2;
-
-                        // Calculate screen coordinates based on zoom and pan
-                        const xPos = cx + (file.x + translation.x) * scale;
-                        const yPos = cy + (file.y + translation.y) * scale;
-
-                        return (
-                            <div
-                                key={`file-${i}`}
-                                className="file-header-label"
-                                style={{
-                                    left: `${xPos}px`,
-                                    top: `${yPos - 100 * scale}px`, // Place 20px above the dataset
-                                }}
-                            >
-                                SOURCE: {file.name}
-                            </div>
-                        );
-                    })}
-                    {bars.map((bar, i) => {
-                        // 1. Zoom Threshold: Don't show labels if we are zoomed too far out
-                        if (scale < 0.8) return null;
-
-                        const cx = window.innerWidth / 2;
-                        const cy = window.innerHeight / 2;
-
-                        // Calculate screen position
-                        const left =
-                            cx + (bar.x + bar.w / 2 + translation.x) * scale;
-                        const top = cy + (bar.y + 20 + translation.y) * scale;
-
-                        // 2. Viewport Culling: Only render if the label is actually on screen
-                        const padding = 100; // Buffer to prevent labels from popping in at the edges
-                        if (
-                            left < -padding ||
-                            left > window.innerWidth + padding ||
-                            top < -padding ||
-                            top > window.innerHeight + padding
-                        ) {
-                            return null;
-                        }
-
-                        return (
-                            <div
-                                key={i}
-                                className="label"
-                                style={{ left, top }}
-                            >
-                                {bar.label}
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-            {uiVisible && (
-                <div className="controls">
-                    <input
-                        type="file"
-                        accept=".json"
-                        multiple
-                        onChange={handleFileUpload}
+                <>
+                    <ChartOverlays
+                        titles={titles}
+                        fileLabels={fileLabels}
+                        bars={bars}
+                        scale={scale}
+                        translation={translation}
                     />
-                    <button
-                        onClick={() => {
-                            setShowLegend((prev) => !prev);
-                        }}
-                        disabled={!hasValidData}
-                        className={!hasValidData ? "disabled-button" : ""}
-                    >
-                        {showLegend ? "Hide Legend" : "Show Legend"}
-                    </button>
 
-                    <div className="zoom-indicator">
-                        ZOOM: {scale.toFixed(2)}x
-                    </div>
-                    <div className="culling-indicator">
-                        CULLING: {culling ? "ON" : "OFF"}
-                    </div>
-
-                    <button
-                        onClick={() => {
-                            const minX =
-                                bars.length > 0
-                                    ? Math.min(...bars.map((b) => b.x))
-                                    : 0;
-                            setScale(1);
-                            setTranslation({ x: -minX + 50, y: 0 });
-                        }}
-                    >
-                        Reset View
-                    </button>
-
-                    {/* Legend */}
-                    <div
-                        className="legend"
-                        style={{ display: showLegend ? "flex" : "none" }}
-                    >
-                        {legend.map((item, i) => {
-                            const r = Math.round(item.color[0] * 255);
-                            const g = Math.round(item.color[1] * 255);
-                            const b = Math.round(item.color[2] * 255);
-                            const a = item.color[3];
-
-                            return (
-                                <div key={i} className="legend-item">
-                                    <div
-                                        className="legend-color"
-                                        style={{
-                                            backgroundColor: `rgba(${r}, ${g}, ${b}, ${a})`,
-                                        }}
-                                    />
-                                    <span>{item.name}</span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
+                    <ControlPanel
+                        hasValidData={hasValidData}
+                        handleFileUpload={handleFileUpload}
+                        setShowLegend={setShowLegend}
+                        showLegend={showLegend}
+                        scale={scale}
+                        culling={culling}
+                        bars={bars}
+                        setScale={setScale}
+                        setTranslation={setTranslation}
+                        legend={legend}
+                    />
+                </>
             )}
-            {showShortcuts && (
-                <div className="shortcuts-panel">
-                    <div className="shortcuts-title">Keyboard Shortcuts</div>
-                    <div>alt + K → Toggle UI</div>
-                    <div>alt + M → Toggle Help</div>
-                    <div>alt + c → Toggle culling</div>
-                    <div>Mouse Wheel → Zoom</div>
-                </div>
-            )}
+
+            {showShortcuts && <ShortcutsPanel />}
         </div>
     );
 };
 
 export default BarChart;
+
+// title and labels return block
+const ChartOverlays: React.FC<{
+    titles: string[];
+    fileLabels: { name: string; x: number; y: number }[];
+    bars: BarData[];
+    scale: number;
+    translation: { x: number; y: number };
+}> = ({ titles, fileLabels, bars, scale, translation }) => {
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+
+    return (
+        <div className="ui-overlay">
+            {/* Titles Mapping */}
+            {titles.map((title, i) => (
+                <div
+                    key={`title-${i}`}
+                    className="chart-title"
+                    style={{
+                        left: `${cx + translation.x * scale}px`,
+                        top: `${cy + (-(i * 300) - 200 + translation.y) * scale}px`,
+                    }}
+                >
+                    {title}
+                </div>
+            ))}
+
+            {/* File Source Labels Mapping */}
+            {fileLabels.map((file, i) => (
+                <div
+                    key={`file-${i}`}
+                    className="file-header-label"
+                    style={{
+                        left: `${cx + (file.x + translation.x) * scale}px`,
+                        top: `${cy + (file.y + translation.y - 100) * scale}px`,
+                    }}
+                >
+                    SOURCE: {file.name}
+                </div>
+            ))}
+
+            {/* Bar Labels (with Zoom/Viewport Culling) */}
+            {scale >= 0.8 &&
+                bars.map((bar, i) => {
+                    const left =
+                        cx + (bar.x + bar.w / 2 + translation.x) * scale;
+                    const top = cy + (bar.y + 20 + translation.y) * scale;
+
+                    if (
+                        left < -100 ||
+                        left > window.innerWidth + 100 ||
+                        top < -100 ||
+                        top > window.innerHeight + 100
+                    )
+                        return null;
+
+                    return (
+                        <div key={i} className="label" style={{ left, top }}>
+                            {bar.label}
+                        </div>
+                    );
+                })}
+        </div>
+    );
+};
+
+// control panel and legend logic
+const ControlPanel: React.FC<{
+    hasValidData: boolean;
+    handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    setShowLegend: React.Dispatch<React.SetStateAction<boolean>>;
+    showLegend: boolean;
+    scale: number;
+    culling: boolean;
+    bars: BarData[];
+    setScale: (s: number) => void;
+    setTranslation: (t: { x: number; y: number }) => void;
+    legend: LegendItem[];
+}> = ({
+    hasValidData,
+    handleFileUpload,
+    setShowLegend,
+    showLegend,
+    scale,
+    culling,
+    bars,
+    setScale,
+    setTranslation,
+    legend,
+}) => (
+    <div className="controls">
+        <input
+            type="file"
+            accept=".json"
+            multiple
+            onChange={handleFileUpload}
+        />
+        <button
+            onClick={() => setShowLegend(!showLegend)}
+            disabled={!hasValidData}
+            className={!hasValidData ? "disabled-button" : ""}
+        >
+            {showLegend ? "Hide Legend" : "Show Legend"}
+        </button>
+
+        <div className="zoom-indicator">ZOOM: {scale.toFixed(2)}x</div>
+        <div className="culling-indicator">
+            CULLING: {culling ? "ON" : "OFF"}
+        </div>
+
+        <button
+            onClick={() => {
+                const minX =
+                    bars.length > 0 ? Math.min(...bars.map((b) => b.x)) : 0;
+                setScale(1);
+                setTranslation({ x: -minX + 50, y: 0 });
+            }}
+        >
+            Reset View
+        </button>
+
+        {showLegend && (
+            <div className="legend" style={{ display: "flex" }}>
+                {legend.map((item, i) => {
+                    const [r, g, b, a] = item.color.map((c, idx) =>
+                        idx < 3 ? Math.round(c * 255) : c,
+                    );
+                    return (
+                        <div key={i} className="legend-item">
+                            <div
+                                className="legend-color"
+                                style={{
+                                    backgroundColor: `rgba(${r}, ${g}, ${b}, ${a})`,
+                                }}
+                            />
+                            <span>{item.name}</span>
+                        </div>
+                    );
+                })}
+            </div>
+        )}
+    </div>
+);
+
+// shortcuts panel logic
+const ShortcutsPanel = () => (
+    <div className="shortcuts-panel">
+        <div className="shortcuts-title">Keyboard Shortcuts</div>
+        <div>alt + K → Toggle UI</div>
+        <div>alt + M → Toggle Help</div>
+        <div>alt + c → Toggle culling</div>
+        <div>Mouse Wheel → Zoom</div>
+    </div>
+);
