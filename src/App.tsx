@@ -247,7 +247,7 @@ const BarChart: React.FC = () => {
 
             indexCountRef.current = uintData.length;
         },
-        [scale, translation],
+        [scale, translation, culling],
     );
 
     const draw = useCallback(() => {
@@ -315,7 +315,7 @@ const BarChart: React.FC = () => {
         gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, stride, 2 * 4);
 
         gl.drawArrays(gl.LINE_LOOP, 0, borderVertexCountRef.current);
-    }, [scale, translation]);
+    }, [scale, translation, updateIndexBufferFromCulling]);
 
     // USE_EFFECTS grouping
 
