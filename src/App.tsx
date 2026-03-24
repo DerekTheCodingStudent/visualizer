@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import "./App.css";
 
-import type { LegendItem, BarData, ChartDefinition, Quad, Rect } from "./types";
+import type { LegendItem, BarData, ChartDefinition, Quad } from "./types";
 import { VS_SOURCE, FS_SOURCE } from "./shaders";
 import { computeViewRect } from "./utils/mathUtils";
 import { QuadNode, buildQuadTree, queryVisibleIndices } from "./utils/quadTree";
