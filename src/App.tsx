@@ -1,10 +1,19 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import "./App.css";
 
-import type { LegendItem, BarData, ChartDefinition, Quad } from "./types";
+import type {
+    LegendItem,
+    BarData,
+    ChartDefinition,
+    Quad,
+    Orientation,
+} from "./types";
 import { VS_SOURCE, FS_SOURCE } from "./shaders";
 import { computeViewRect } from "./utils/mathUtils";
 import { QuadNode, buildQuadTree, queryVisibleIndices } from "./utils/quadTree";
+
+const trackSpacing = 60;
+const visualBarHeight = 30;
 
 const BarChart: React.FC = () => {
     // data grouping
@@ -22,7 +31,7 @@ const BarChart: React.FC = () => {
     const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
     const [uiVisible, setUiVisible] = useState(true);
     const [showLegend, setShowLegend] = useState(false);
-    const [culling, setCulling] = useState(true);
+    const [culling, setCulling] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(true);
     const [orientation, setOrientation] = useState<Orientation>("horizontal");
 
@@ -46,53 +55,73 @@ const BarChart: React.FC = () => {
   ================================ */
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files) return;
+        const fList = e.target.files;
+        if (!fList) return;
 
+        const files = Array.from(fList);
         const allBars: BarData[] = [];
         const labels: { name: string; x: number; y: number }[] = [];
         let combinedLegend: LegendItem[] = [];
         const newTitles: string[] = [];
-        const verticalSpacing = 300; // Offset between datasets
+        let totalY = 0;
+        let barCount = 0;
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            const text = await file.text();
-
             try {
+                // Read the actual file content
+                const text = await file.text();
                 const parsed: ChartDefinition = JSON.parse(text);
-                const currentYOffset = -(i * verticalSpacing);
 
-                const minX = Math.min(...parsed.bars.map((b) => b.x));
-                // Offset the Y position of bars for each subsequent file
-                const offsetBars = parsed.bars.map((bar) => ({
-                    ...bar,
-                    y: bar.y + currentYOffset,
-                    sourceFile: file.name,
-                }));
-
-                allBars.push(...offsetBars);
-                labels.push({ name: file.name, x: minX, y: currentYOffset });
-                if (parsed.title) {
-                    newTitles.push(parsed.title);
-                }
-
-                // Merge legends if they are different (or just take the first)
+                // Set legend from the first file to enable UI and colors
                 if (i === 0) combinedLegend = parsed.legend;
+                if (parsed.title) newTitles.push(parsed.title);
+
+                const fileYOffset = -(i * 10);
+                const minX =
+                    parsed.bars.length > 0
+                        ? Math.min(...parsed.bars.map((b) => b.x))
+                        : 0;
+
+                parsed.bars.forEach((bar) => {
+                    const adjustedY = bar.y + fileYOffset;
+                    allBars.push({
+                        ...bar,
+                        y: adjustedY,
+                        sourceFile: file.name,
+                    });
+                    totalY += adjustedY;
+                    barCount++;
+                });
+
+                labels.push({ name: file.name, x: minX, y: fileYOffset });
             } catch (err) {
                 console.error(`Failed to parse ${file.name}`, err);
             }
         }
+        if (allBars.length === 0) return;
 
-        const globalMinX =
-            allBars.length > 0 ? Math.min(...allBars.map((b) => b.x)) : 0;
+        // Center the lanes around Y = 0
+        const centerY = barCount > 0 ? totalY / barCount : 0;
+        const centeredBars = allBars.map((bar) => ({
+            ...bar,
+            y: bar.y - centerY,
+        }));
+
+        const minX = Math.min(...centeredBars.map((b) => b.x));
+        const maxX = Math.max(...centeredBars.map((b) => b.x + b.w));
+        const minY = Math.min(...centeredBars.map((b) => b.y * trackSpacing));
+        const maxY = Math.max(...centeredBars.map((b) => b.y * trackSpacing));
+        const dataCenterX = (minX + maxX) / 2;
+        const dataCenterY = (minY + maxY) / 2;
 
         setTitles(newTitles);
-        setBars(allBars);
         setLegend(combinedLegend);
         setFileLabels(labels);
+        setBars(centeredBars);
+
         setScale(1);
-        setTranslation({ x: -globalMinX + 50, y: 0 });
+        setTranslation({ x: -dataCenterX, y: -dataCenterY });
     };
 
     // geometry groupings
@@ -105,15 +134,11 @@ const BarChart: React.FC = () => {
         const vertexData: number[] = [];
         const baseQuads: Quad[] = [];
 
-        const trackSpacing = 80;
-        const visualBarHeight = 30;
-
         bars.forEach((bar) => {
             const total = bar.segments.reduce((a, b) => a + b, 0);
             if (total === 0) return;
 
             let offset = 0;
-
             const scaledY = bar.y * trackSpacing;
 
             bar.segments.forEach((value, i) => {
@@ -541,9 +566,6 @@ const ChartOverlays: React.FC<{
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
 
-    const trackSpacing = 80;
-    const visualBarHeight = 30;
-
     return (
         <div className="ui-overlay">
             {/* Titles Mapping */}
@@ -666,16 +688,29 @@ const ControlPanel: React.FC<{
         </button>
 
         <div className="zoom-indicator">ZOOM: {scale.toFixed(2)}x</div>
+
         <div className="culling-indicator">
             CULLING: {culling ? "ON" : "OFF"}
         </div>
 
         <button
             onClick={() => {
-                const minX =
-                    bars.length > 0 ? Math.min(...bars.map((b) => b.x)) : 0;
+                if (bars.length === 0) return;
+
+                const minX = Math.min(...bars.map((b) => b.x));
+                const maxX = Math.max(...bars.map((b) => b.x + b.w));
+                const minY = Math.min(...bars.map((b) => b.y * trackSpacing));
+                const maxY = Math.max(...bars.map((b) => b.y * trackSpacing));
+
+                const dataCenterX = (minX + maxX) / 2;
+                const dataCenterY = (minY + maxY) / 2;
+
                 setScale(1);
-                setTranslation({ x: -minX + 50, y: 0 });
+                // Translation is inverse of world position to bring it to (0,0) screen space
+                setTranslation({
+                    x: -dataCenterX,
+                    y: -dataCenterY,
+                });
             }}
         >
             Reset View
