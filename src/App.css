@@ -144,3 +144,51 @@ button:disabled {
     padding: 8px 15px;
     border: 1px solid #000000;
 }
+
+.axis-relative-container {
+    position: absolute;
+    width: 100%;
+    pointer-events: none;
+    z-index: 5;
+}
+
+/* The horizontal line of the "half box" */
+.axis-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: #000000;
+}
+
+.tick-container {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Small vertical lines on the axis */
+.tick-mark {
+    width: 2px;
+    height: 8px;
+    background: #000000;
+}
+
+.tick-value {
+    font-size: 11px;
+    font-weight: bold;
+    color: #000000;
+    margin-top: 4px;
+    white-space: nowrap;
+}
+
+.axis-title {
+    position: absolute;
+    top: 30px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #000000;
+    transform: translateX(-50%);
+}

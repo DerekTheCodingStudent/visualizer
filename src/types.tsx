@@ -17,6 +17,7 @@ export interface BarData {
 
 export interface ChartDefinition {
     title?: string;
+    unit?: string;
     legend: LegendItem[];
     bars: BarData[];
 }

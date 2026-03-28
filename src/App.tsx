@@ -23,6 +23,7 @@ const BarChart: React.FC = () => {
         { name: string; x: number; y: number }[]
     >([]);
     const [titles, setTitles] = useState<string[]>([]);
+    const [unit, setUnit] = useState<string>("ms");
 
     // navigation/ui grouping
     const [scale, setScale] = useState(1);
@@ -72,6 +73,10 @@ const BarChart: React.FC = () => {
                 // Read the actual file content
                 const text = await file.text();
                 const parsed: ChartDefinition = JSON.parse(text);
+
+                if (parsed.unit) {
+                    setUnit(parsed.unit);
+                }
 
                 // Set legend from the first file to enable UI and colors
                 if (i === 0) combinedLegend = parsed.legend;
@@ -530,6 +535,13 @@ const BarChart: React.FC = () => {
                         orientation={orientation}
                     />
 
+                    <XAxis
+                        bars={bars}
+                        scale={scale}
+                        translation={translation}
+                        unit={unit}
+                    />
+
                     <ControlPanel
                         hasValidData={hasValidData}
                         handleFileUpload={handleFileUpload}
@@ -760,3 +772,79 @@ const ShortcutsPanel = () => (
         <div>Mouse Wheel → Zoom</div>
     </div>
 );
+
+// units logic
+const XAxis: React.FC<{
+    bars: BarData[];
+    scale: number;
+    translation: { x: number; y: number };
+    unit: string;
+}> = ({ bars, scale, translation, unit }) => {
+    if (bars.length === 0) return null;
+
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+
+    const maxY = Math.max(...bars.map((b) => b.y));
+    const axisYWorld = maxY * trackSpacing + visualBarHeight; // Position axis slightly below bottom bar
+    const axisYScreen = cy + (axisYWorld + translation.y) * scale;
+
+    // Calculate world-space horizontal range currently in view
+    const leftWorld = -cx / scale - translation.x;
+    const rightWorld = cx / scale - translation.x;
+
+    // Determine interval size based on zoom
+    const targetSpacingPx = 100;
+    const worldUnitsPerTick = targetSpacingPx / scale;
+    const exponent = Math.floor(Math.log10(worldUnitsPerTick));
+    const fraction = worldUnitsPerTick / Math.pow(10, exponent);
+
+    let interval;
+    if (fraction < 1.5) interval = 1;
+    else if (fraction < 3) interval = 2;
+    else if (fraction < 7) interval = 5;
+    else interval = 10;
+    interval *= Math.pow(10, exponent);
+
+    const startTick = Math.max(Math.ceil(leftWorld / interval) * interval, 0);
+    const ticks = [];
+    for (let t = startTick; t <= rightWorld; t += interval) {
+        ticks.push(t);
+    }
+
+    return (
+        <div
+            className="axis-relative-container"
+            style={{ top: `${axisYScreen}px` }}
+        >
+            {/* The horizontal axis line (bottom of the box) */}
+            <div className="axis-line" />
+
+            {ticks.map((tick) => {
+                const tickLeft = cx + (tick + translation.x) * scale;
+                if (tickLeft < 0 || tickLeft > window.innerWidth) return null;
+
+                return (
+                    <div
+                        key={tick}
+                        className="tick-container"
+                        style={{ left: `${tickLeft}px` }}
+                    >
+                        <div className="tick-mark" />
+                        <span className="tick-value">
+                            {tick.toLocaleString()} {unit}
+                        </span>
+                    </div>
+                );
+            })}
+
+            {/* Legend label for the axis */}
+            <div
+                className="axis-title"
+                style={{ left: `${cx + translation.x * scale}px` }}
+            >
+                Time ({unit})
+            </div>
+        </div>
+    );
+};
