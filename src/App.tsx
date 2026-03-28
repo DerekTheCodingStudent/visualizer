@@ -12,7 +12,7 @@ import { VS_SOURCE, FS_SOURCE } from "./shaders";
 import { computeViewRect } from "./utils/mathUtils";
 import { QuadNode, buildQuadTree, queryVisibleIndices } from "./utils/quadTree";
 
-const trackSpacing = 60;
+const trackSpacing = 100;
 const visualBarHeight = 30;
 
 const BarChart: React.FC = () => {
@@ -566,6 +566,8 @@ const ChartOverlays: React.FC<{
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
 
+    const labels = new Set<string>();
+
     return (
         <div className="ui-overlay">
             {/* Titles Mapping */}
@@ -599,9 +601,25 @@ const ChartOverlays: React.FC<{
             {/* Bar Labels (with Zoom/Viewport Culling) */}
             {scale >= 0.8 &&
                 bars.map((bar, i) => {
+                    const currLabel = `${bar.label}_${bar.y}`;
+
+                    if (labels.has(currLabel)) {
+                        return null;
+                    }
+
                     const left = cx + (bar.x + translation.x) * scale;
                     const scaledY = bar.y * trackSpacing;
                     const top = cy + (scaledY + translation.y) * scale;
+
+                    if (
+                        left < -100 ||
+                        left > window.innerWidth + 100 ||
+                        top < -100 ||
+                        top > window.innerHeight + 100
+                    )
+                        return null;
+
+                    labels.add(currLabel);
 
                     const labelStyle: React.CSSProperties =
                         orientation === "horizontal"
@@ -615,13 +633,6 @@ const ChartOverlays: React.FC<{
                                   top: `${top}px`,
                                   transform: "translateX(10px)",
                               };
-                    if (
-                        left < -100 ||
-                        left > window.innerWidth + 100 ||
-                        top < -100 ||
-                        top > window.innerHeight + 100
-                    )
-                        return null;
 
                     return (
                         <div key={i} className="label" style={labelStyle}>
