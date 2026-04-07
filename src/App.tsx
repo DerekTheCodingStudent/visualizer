@@ -71,8 +71,9 @@ function collectBarSegmentQuads(
                 const segmentHeight = (value / total) * bar.h;
                 x1 = bar.x;
                 x2 = bar.x + bar.w;
-                yBottom = scaledY + offset;
-                yTop = yBottom + segmentHeight;
+                // First segment at scaledY + bar.h (screen bottom); stack upward (−wy on screen) for later phases.
+                yTop = scaledY + bar.h - offset;
+                yBottom = yTop - segmentHeight;
                 offset += segmentHeight;
             }
 
