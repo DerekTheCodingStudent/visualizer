@@ -135,3 +135,13 @@ export function mapDataXToPlotWorld(
     if (src.w <= 0) return dataX;
     return dest.minX + (dataX - src.minX) * (dest.w / src.w);
 }
+
+/** Map a data-space Y coordinate into plot-world Y using the same linear scale as the quads. */
+export function mapDataYToPlotWorld(
+    dataY: number,
+    src: BBox,
+    dest: BBox,
+): number {
+    if (src.h <= 0) return dataY;
+    return dest.minY + (dataY - src.minY) * (dest.h / src.h);
+}

@@ -16,12 +16,15 @@ import {
     getChartPlotBBox,
     mapPointBetweenBBoxes,
     mapDataXToPlotWorld,
+    mapDataYToPlotWorld,
 } from "./utils/mathUtils";
 import { QuadNode, buildQuadTree, queryVisibleIndices } from "./utils/quadTree";
 
 const trackSpacing = 100;
 /** Plot-world units: vertical category labels sit just below the chart bbox (outside the frame). */
 const verticalLabelBelowPlotWorld = 14;
+/** Screen px: nudge the vertical-mode axis title left so it does not overlap tick values. */
+const verticalAxisTitleOutwardPx = 36;
 
 /** Segment quads in data space (same layout as WebGL before remap to the plot box). */
 function collectBarSegmentQuads(
@@ -399,7 +402,7 @@ const BarChart: React.FC = () => {
         gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, stride, 2 * 4);
 
         gl.drawArrays(gl.LINE_LOOP, 0, borderVertexCountRef.current);
-    }, [scale, translation, updateIndexBufferFromCulling]);
+    }, [scale, translation, orientation, updateIndexBufferFromCulling]);
 
     // USE_EFFECTS grouping
 
@@ -676,14 +679,15 @@ const ChartOverlays: React.FC<{
                     let worldX: number;
                     let worldY: number;
                     if (orientation === "vertical") {
-                        // X: center of bar in data space → plot X. Y: shared baseline under the plot
-                        // (do not map per-bar data Y or high tracks end up near the top of the bbox).
+                        // X: center of bar in data space → plot X. Y: baseline just under the plot
+                        // (HTML overlay Y: larger world Y → lower on screen; chart bottom is maxY).
                         const dataX = bar.x + bar.w / 2;
                         worldX =
                             srcBBox != null
                                 ? mapDataXToPlotWorld(dataX, srcBBox, destBBox)
                                 : dataX;
-                        worldY = destBBox.minY - verticalLabelBelowPlotWorld;
+                        worldY =
+                            destBBox.maxY + verticalLabelBelowPlotWorld;
                     } else {
                         const dataX = bar.y;
                         const dataY = bar.x + bar.w / 2;
@@ -701,10 +705,7 @@ const ChartOverlays: React.FC<{
                     }
 
                     const { left, top } = worldToScreen(worldX, worldY);
-                    const bottom =
-                        window.innerHeight - top;
-                    console.log("bottom", bottom);
-                    console.log("top", top);
+                    const labelBottomPx = window.innerHeight - top - 8;
 
                     if (
                         left < -100 ||
@@ -720,9 +721,9 @@ const ChartOverlays: React.FC<{
                         orientation === "vertical"
                             ? {
                                   left: `${left}px`,
-                                  top: `auto`,
-                                  bottom: `${bottom - 16}px`,
-                                  transform: "translate(-50%, 2000%)",
+                                  top: "auto",
+                                  bottom: `${labelBottomPx}px`,
+                                  transform: "translate(-50%, 0)",
                               }
                             : {
                                   left: `${left - 8}px`,
@@ -857,7 +858,19 @@ const ShortcutsPanel = () => (
     </div>
 );
 
-// units logic — axis sits on the bottom edge of the plot bbox, span [minX, maxX] in plot space
+function niceTickIntervalFromRough(rough: number): number {
+    if (!Number.isFinite(rough) || rough <= 0) return 1;
+    const exponent = Math.floor(Math.log10(rough));
+    const fraction = rough / Math.pow(10, exponent);
+    let base: number;
+    if (fraction < 1.5) base = 1;
+    else if (fraction < 3) base = 2;
+    else if (fraction < 7) base = 5;
+    else base = 10;
+    return base * Math.pow(10, exponent);
+}
+
+// Horizontal mode: units axis along bottom (X). Vertical mode: units axis along left (Y).
 const XAxis: React.FC<{
     bars: BarData[];
     legend: LegendItem[];
@@ -875,22 +888,91 @@ const XAxis: React.FC<{
     const srcBBox = computeBoundingBox(dataQuads);
     const destBBox = getChartPlotBBox();
 
-    const axisYWorld = destBBox.minY;
+    const targetSpacingPx = 100;
+
+    if (orientation === "vertical") {
+        const lineX = cx + (destBBox.minX + translation.x) * scale;
+        const topEdge = cy + (destBBox.minY + translation.y) * scale;
+        const lineHeight = destBBox.h * scale;
+
+        let yTicks: number[] = [];
+        if (srcBBox != null && srcBBox.h > 0 && destBBox.h > 0) {
+            const rough =
+                (targetSpacingPx * srcBBox.h) / (destBBox.h * scale);
+            const interval = niceTickIntervalFromRough(rough);
+            const startTick = Math.ceil(srcBBox.minY / interval) * interval;
+            for (let t = startTick; t <= srcBBox.maxY + 1e-9; t += interval) {
+                yTicks.push(t);
+            }
+        }
+
+        const axisTitleTop = topEdge + lineHeight / 2;
+
+        return (
+            <div
+                className="axis-relative-container axis-relative-container--fill"
+            >
+                <div
+                    className="axis-line-vertical"
+                    style={{
+                        left: `${lineX}px`,
+                        top: `${topEdge}px`,
+                        height: `${lineHeight}px`,
+                    }}
+                />
+
+                {srcBBox != null &&
+                    yTicks.map((tick) => {
+                        const plotY = mapDataYToPlotWorld(
+                            tick,
+                            srcBBox,
+                            destBBox,
+                        );
+                        const tickTop =
+                            cy + (plotY + translation.y) * scale;
+                        if (
+                            tickTop < -40 ||
+                            tickTop > window.innerHeight + 40
+                        )
+                            return null;
+
+                        return (
+                            <div
+                                key={tick}
+                                className="axis-y-tick-row"
+                                style={{
+                                    top: `${tickTop}px`,
+                                    left: `${lineX}px`,
+                                }}
+                            >
+                                <span className="tick-value axis-y-tick-value">
+                                    {tick.toLocaleString()} {unit}
+                                </span>
+                                <div className="axis-y-tick-mark" />
+                            </div>
+                        );
+                    })}
+
+                <div
+                    className="axis-title axis-title-vertical"
+                    style={{
+                        left: `${lineX - verticalAxisTitleOutwardPx}px`,
+                        top: `${axisTitleTop}px`,
+                    }}
+                >
+                    Time ({unit})
+                </div>
+            </div>
+        );
+    }
+
+    const axisYWorld = destBBox.maxY;
     const axisYScreen = cy + (axisYWorld + translation.y) * scale;
     const lineLeft = cx + (destBBox.minX + translation.x) * scale;
     const lineWidth = destBBox.w * scale;
 
-    const targetSpacingPx = 100;
     const worldUnitsPerTick = targetSpacingPx / scale;
-    const exponent = Math.floor(Math.log10(worldUnitsPerTick));
-    const fraction = worldUnitsPerTick / Math.pow(10, exponent);
-
-    let interval: number;
-    if (fraction < 1.5) interval = 1;
-    else if (fraction < 3) interval = 2;
-    else if (fraction < 7) interval = 5;
-    else interval = 10;
-    interval *= Math.pow(10, exponent);
+    const interval = niceTickIntervalFromRough(worldUnitsPerTick);
 
     const ticks: number[] = [];
     if (srcBBox != null && srcBBox.w > 0) {
