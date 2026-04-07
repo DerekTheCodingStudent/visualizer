@@ -1,0 +1,110 @@
+{
+  "type": "bar",
+  "title": "Long-run timeline (transparent segments)",
+  "unit": "ms",
+  "legend": [
+    { "name": "Compile", "color": [0.2, 0.75, 0.95, 0.55] },
+    { "name": "Link", "color": [0.95, 0.45, 0.15, 0.5] },
+    { "name": "Execute", "color": [0.45, 0.85, 0.35, 0.6] },
+    { "name": "I/O wait", "color": [0.55, 0.5, 0.95, 0.45] },
+    { "name": "Teardown", "color": [0.75, 0.75, 0.78, 0.5] }
+  ],
+  "bars": [
+    {
+      "x": 0,
+      "y": 0,
+      "w": 34,
+      "h": 2200,
+      "label": "main — cold build",
+      "segments": [620, 380, 840, 260, 100]
+    },
+    {
+      "x": 44,
+      "y": 180,
+      "w": 34,
+      "h": 1850,
+      "label": "worker-2 — after sync",
+      "segments": [410, 520, 610, 210, 100]
+    },
+    {
+      "x": 88,
+      "y": 420,
+      "w": 34,
+      "h": 2400,
+      "label": "worker-3 — GPU queue",
+      "segments": [900, 300, 720, 380, 100]
+    },
+    {
+      "x": 132,
+      "y": 90,
+      "w": 34,
+      "h": 1680,
+      "label": "worker-4 — incremental",
+      "segments": [280, 440, 720, 140, 100]
+    },
+    {
+      "x": 176,
+      "y": 640,
+      "w": 34,
+      "h": 2100,
+      "label": "worker-5 — late start",
+      "segments": [550, 550, 700, 200, 100]
+    },
+    {
+      "x": 220,
+      "y": 310,
+      "w": 34,
+      "h": 1950,
+      "label": "worker-6",
+      "segments": [480, 360, 880, 130, 100]
+    },
+    {
+      "x": 264,
+      "y": 980,
+      "w": 34,
+      "h": 2550,
+      "label": "worker-7 — long I/O",
+      "segments": [1100, 400, 650, 300, 100]
+    },
+    {
+      "x": 308,
+      "y": 50,
+      "w": 34,
+      "h": 1780,
+      "label": "worker-8 — fast path",
+      "segments": [320, 510, 780, 70, 100]
+    },
+    {
+      "x": 352,
+      "y": 520,
+      "w": 34,
+      "h": 2300,
+      "label": "worker-9",
+      "segments": [780, 420, 820, 180, 100]
+    },
+    {
+      "x": 396,
+      "y": 1180,
+      "w": 34,
+      "h": 2000,
+      "label": "worker-10 — blocked",
+      "segments": [500, 500, 700, 200, 100]
+    },
+    {
+      "x": 440,
+      "y": 740,
+      "w": 34,
+      "h": 2150,
+      "label": "worker-11",
+      "segments": [650, 450, 750, 200, 100]
+    },
+    {
+      "x": 484,
+      "y": 260,
+      "w": 34,
+      "h": 1890,
+      "label": "worker-12 — mixed",
+      "segments": [390, 470, 820, 110, 100]
+    }
+  ]
+}

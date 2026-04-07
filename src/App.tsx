@@ -26,6 +26,18 @@ const verticalLabelBelowPlotWorld = 14;
 /** Screen px: nudge the vertical-mode axis title left so it does not overlap tick values. */
 const verticalAxisTitleOutwardPx = 36;
 
+/**
+ * Translation so the fixed plot bbox (post-remap WebGL coords) sits on world origin → canvas center.
+ * Must not use raw bar positions: geometry is always remapped into `getChartPlotBBox()` first.
+ */
+function translationToCenterPlotInWorld(): { x: number; y: number } {
+    const b = getChartPlotBBox();
+    return {
+        x: -((b.minX + b.maxX) / 2),
+        y: -((b.minY + b.maxY) / 2),
+    };
+}
+
 /** Segment quads in data space (same layout as WebGL before remap to the plot box). */
 function collectBarSegmentQuads(
     bars: BarData[],
@@ -89,7 +101,9 @@ const BarChart: React.FC = () => {
 
     // navigation/ui grouping
     const [scale, setScale] = useState(1);
-    const [translation, setTranslation] = useState({ x: 0, y: 0 });
+    const [translation, setTranslation] = useState(() =>
+        translationToCenterPlotInWorld(),
+    );
     const [isDragging, setIsDragging] = useState(false);
     const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
     const [uiVisible, setUiVisible] = useState(true);
@@ -175,20 +189,13 @@ const BarChart: React.FC = () => {
             y: bar.y - centerY,
         }));
 
-        const minX = Math.min(...centeredBars.map((b) => b.x));
-        const maxX = Math.max(...centeredBars.map((b) => b.x + b.w));
-        const minY = Math.min(...centeredBars.map((b) => b.y * trackSpacing));
-        const maxY = Math.max(...centeredBars.map((b) => b.y * trackSpacing));
-        const dataCenterX = (minX + maxX) / 2;
-        const dataCenterY = (minY + maxY) / 2;
-
         setTitles(newTitles);
         setLegend(combinedLegend);
         setFileLabels(labels);
         setBars(centeredBars);
 
         setScale(1);
-        setTranslation({ x: -dataCenterX, y: -dataCenterY });
+        setTranslation(translationToCenterPlotInWorld());
     };
 
     // geometry groupings
@@ -805,20 +812,8 @@ const ControlPanel: React.FC<{
             onClick={() => {
                 if (bars.length === 0) return;
 
-                const minX = Math.min(...bars.map((b) => b.x));
-                const maxX = Math.max(...bars.map((b) => b.x + b.w));
-                const minY = Math.min(...bars.map((b) => b.y * trackSpacing));
-                const maxY = Math.max(...bars.map((b) => b.y * trackSpacing));
-
-                const dataCenterX = (minX + maxX) / 2;
-                const dataCenterY = (minY + maxY) / 2;
-
                 setScale(1);
-                // Translation is inverse of world position to bring it to (0,0) screen space
-                setTranslation({
-                    x: -dataCenterX,
-                    y: -dataCenterY,
-                });
+                setTranslation(translationToCenterPlotInWorld());
             }}
         >
             Reset View
