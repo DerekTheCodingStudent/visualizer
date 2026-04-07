@@ -9,11 +9,31 @@ import type {
     Orientation,
 } from "./types";
 import { VS_SOURCE, FS_SOURCE } from "./shaders";
-import { computeViewRect } from "./utils/mathUtils";
+import {
+    computeViewRect,
+    computeBoundingBox,
+    remapQuadsToBoundingBox,
+} from "./utils/mathUtils";
+import type { BBox } from "./utils/mathUtils";
 import { QuadNode, buildQuadTree, queryVisibleIndices } from "./utils/quadTree";
 
 const trackSpacing = 100;
 const visualBarHeight = 30;
+
+/** Plot area in world space; must match `generateBorderBuffer` quad. */
+const chartPlotCenter = { cx: 0, cy: 0 };
+const chartPlotHalfWidth = 300;
+const chartPlotTop = 100;
+const chartPlotBottom = -200;
+
+function chartDestinationBBox(): BBox {
+    const { cx, cy } = chartPlotCenter;
+    const minX = cx - chartPlotHalfWidth;
+    const maxX = cx + chartPlotHalfWidth;
+    const minY = cy + chartPlotBottom;
+    const maxY = cy + chartPlotTop;
+    return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+}
 
 const BarChart: React.FC = () => {
     // data grouping
@@ -23,7 +43,7 @@ const BarChart: React.FC = () => {
         { name: string; x: number; y: number }[]
     >([]);
     const [titles, setTitles] = useState<string[]>([]);
-    const [unit, setUnit] = useState<string>("ms");
+    const [unit, setUnit] = useState<string>("unit");
 
     // navigation/ui grouping
     const [scale, setScale] = useState(1);
@@ -152,18 +172,18 @@ const BarChart: React.FC = () => {
 
                 if (orientation === "horizontal") {
                     // Horizontal (Timeline Mode): Segments stack along X-axis
-                    const segmentWidth = (value / total) * bar.w;
-                    x1 = bar.x + offset;
+                    const segmentWidth = (value / total) * bar.h;
+
+                    x1 = bar.y + offset;
                     x2 = x1 + segmentWidth;
-                    yTop = scaledY + visualBarHeight / 2;
-                    yBottom = scaledY - visualBarHeight / 2;
+                    yTop = bar.x + bar.w;
+                    yBottom = bar.x;
                     offset += segmentWidth;
                 } else {
                     // Vertical (Standard Mode): Segments stack along Y-axis
-                    const segmentHeight =
-                        (value / total) * bar.h * trackSpacing;
-                    x1 = bar.x - 20;
-                    x2 = bar.x + 20;
+                    const segmentHeight = (value / total) * bar.h;
+                    x1 = bar.x;
+                    x2 = bar.x + bar.w;
                     yBottom = scaledY + offset;
                     yTop = yBottom + segmentHeight;
                     offset += segmentHeight;
@@ -176,32 +196,50 @@ const BarChart: React.FC = () => {
                     h: yTop - yBottom,
                     color,
                 });
-
-                vertexData.push(
-                    x1,
-                    yTop,
-                    ...color,
-                    x2,
-                    yTop,
-                    ...color,
-                    x1,
-                    yBottom,
-                    ...color,
-                    x1,
-                    yBottom,
-                    ...color,
-                    x2,
-                    yTop,
-                    ...color,
-                    x2,
-                    yBottom,
-                    ...color,
-                );
             });
         });
 
-        baseQuadsRef.current = baseQuads;
-        quadtreeRef.current = buildQuadTree(baseQuads);
+        const srcBBox = computeBoundingBox(baseQuads);
+        const plotQuads =
+            srcBBox != null
+                ? remapQuadsToBoundingBox(
+                      baseQuads,
+                      srcBBox,
+                      chartDestinationBBox(),
+                  )
+                : baseQuads;
+
+        plotQuads.forEach((q) => {
+            const x1 = q.x;
+            const x2 = q.x + q.w;
+            const yBottom = q.y;
+            const yTop = q.y + q.h;
+            const color = q.color ?? [1, 1, 1, 1];
+
+            vertexData.push(
+                x1,
+                yTop,
+                ...color,
+                x2,
+                yTop,
+                ...color,
+                x1,
+                yBottom,
+                ...color,
+                x1,
+                yBottom,
+                ...color,
+                x2,
+                yTop,
+                ...color,
+                x2,
+                yBottom,
+                ...color,
+            );
+        });
+
+        baseQuadsRef.current = plotQuads;
+        quadtreeRef.current = buildQuadTree(plotQuads);
 
         const floatData = new Float32Array(vertexData);
 
@@ -221,26 +259,25 @@ const BarChart: React.FC = () => {
         const borderBuffer = gl.createBuffer();
         borderBufferRef.current = borderBuffer;
 
-        const cx = 0;
-        const cy = 0;
+        const { cx, cy } = chartPlotCenter;
 
         const borderColor = [0.4, 0.4, 0.4, 1];
 
         const data = new Float32Array([
-            cx - 300,
-            cy + 100,
+            cx - chartPlotHalfWidth,
+            cy + chartPlotTop,
             ...borderColor,
-            cx + 300,
-            cy + 100,
+            cx + chartPlotHalfWidth,
+            cy + chartPlotTop,
             ...borderColor,
-            cx + 300,
-            cy - 200,
+            cx + chartPlotHalfWidth,
+            cy + chartPlotBottom,
             ...borderColor,
-            cx - 300,
-            cy - 200,
+            cx - chartPlotHalfWidth,
+            cy + chartPlotBottom,
             ...borderColor,
         ]);
-
+        console.log(data);
         gl.bindBuffer(gl.ARRAY_BUFFER, borderBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 
@@ -317,10 +354,12 @@ const BarChart: React.FC = () => {
         const resLoc = gl.getUniformLocation(program, "u_resolution");
         const transLoc = gl.getUniformLocation(program, "u_translation");
         const scaleLoc = gl.getUniformLocation(program, "u_scale");
+        const flipLoc = gl.getUniformLocation(program, "u_flip");
 
         gl.uniform2f(resLoc, canvas.width, canvas.height);
         gl.uniform2f(transLoc, translation.x, translation.y);
         gl.uniform1f(scaleLoc, scale);
+        gl.uniform1i(flipLoc, orientation === "horizontal" ? 1 : 0);
 
         const stride = 6 * 4; // 6 floats per vertex
 
@@ -342,6 +381,8 @@ const BarChart: React.FC = () => {
             return 0;
         }
 
+        console.log("index count: ", indexCountRef.current);
+
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
         gl.drawElements(
             gl.TRIANGLES,
@@ -351,6 +392,8 @@ const BarChart: React.FC = () => {
         );
 
         /* ===== Draw Border ===== */
+        const noFlip: int = 0;
+        gl.uniform1i(flipLoc, noFlip);
         gl.bindBuffer(gl.ARRAY_BUFFER, borderBuffer);
 
         gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, stride, 0);
