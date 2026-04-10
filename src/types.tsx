@@ -11,7 +11,7 @@ export interface BarData {
     w: number;
     h: number;
     label: string;
-    segments: { value: number; legendIndex: number }[];
+    segments: { value: number; legendIndex: number; metadata: string }[];
     sourceFile?: string;
 }
 
@@ -32,6 +32,7 @@ export type Quad = {
     w: number;
     h: number;
     color?: [number, number, number, number];
+    metadata?: string;
 };
 
 export type Rect = { x: number; y: number; w: number; h: number };

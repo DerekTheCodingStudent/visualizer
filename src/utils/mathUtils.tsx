@@ -90,6 +90,7 @@ export function remapQuadsToBoundingBox(
         y: dest.minY + (q.y - src.minY) * sy,
         w: q.w * sx,
         h: q.h * sy,
+        metadata: q.metadata,
     }));
 }
 
@@ -153,4 +154,27 @@ export function mapDataYToPlotWorld(
         return dest.maxY - (dataY - src.minY) * sy;
     }
     return dest.minY + (dataY - src.minY) * sy;
+}
+
+export function screenToPlotWorld(
+    screenX: number,
+    screenY: number,
+    centerX: number,
+    centerY: number,
+    translation: { x: number; y: number },
+    scale: number
+): { x: number; y: number } {
+    return {
+        x: (screenX - centerX) / scale - translation.x,
+        y: (screenY - centerY) / scale - translation.y,
+    };
+}
+
+export function pointInRect(px: number, py: number, rect: Rect): boolean {
+    return (
+        px >= rect.x &&
+        px <= rect.x + rect.w &&
+        py >= rect.y &&
+        py <= rect.y + rect.h
+    );
 }
