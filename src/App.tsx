@@ -17,8 +17,9 @@ import {
     mapPointBetweenBBoxes,
     mapDataXToPlotWorld,
     mapDataYToPlotWorld,
+    screenToPlotWorld,
 } from "./utils/mathUtils";
-import { QuadNode, buildQuadTree, queryVisibleIndices } from "./utils/quadTree";
+import { QuadNode, buildQuadTree, queryVisibleIndices, findQuadAt } from "./utils/quadTree";
 
 const trackSpacing = 100;
 /** Plot-world units: vertical category labels sit just below the chart bbox (outside the frame). */
@@ -77,12 +78,15 @@ function collectBarSegmentQuads(
                 offset += segmentHeight;
             }
 
+            const fallbackMetadata = `${legend[segment.legendIndex]?.name || 'Unknown'}: ${segment.value}`;
+
             quads.push({
                 x: x1,
                 y: yBottom,
                 w: x2 - x1,
                 h: yTop - yBottom,
                 color,
+                metadata: segment.metadata || fallbackMetadata
             });
         });
     });
@@ -112,6 +116,11 @@ const BarChart: React.FC = () => {
     const [culling, setCulling] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(true);
     const [orientation, setOrientation] = useState<Orientation>("horizontal");
+    const [hoverInfo, setHoverInfo] = useState<{
+        text: string;
+        x: number;
+        y: number;
+    } | null>(null);
 
     // webgl context/shaders
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -213,10 +222,10 @@ const BarChart: React.FC = () => {
         const plotQuads =
             srcBBox != null
                 ? remapQuadsToBoundingBox(
-                      baseQuads,
-                      srcBBox,
-                      getChartPlotBBox(),
-                  )
+                    baseQuads,
+                    srcBBox,
+                    getChartPlotBBox(),
+                )
                 : baseQuads;
 
         plotQuads.forEach((q) => {
@@ -538,21 +547,55 @@ const BarChart: React.FC = () => {
 
     // mouse dragging feature
     const handleMouseMove = (e: React.MouseEvent) => {
-        if (!isDragging) return;
+        if (isDragging) {
+            // Calculate how far the mouse moved since the last frame
+            const dx = e.clientX - lastMousePos.x;
+            const dy = e.clientY - lastMousePos.y;
 
-        // Calculate how far the mouse moved since the last frame
-        const dx = e.clientX - lastMousePos.x;
-        const dy = e.clientY - lastMousePos.y;
+            // Update translation.
+            // We divide by scale so that dragging feels consistent regardless of zoom level.
+            setTranslation((prev) => ({
+                x: prev.x + dx / scale,
+                y: prev.y + dy / scale,
+            }));
 
-        // Update translation.
-        // We divide by scale so that dragging feels consistent regardless of zoom level.
-        setTranslation((prev) => ({
-            x: prev.x + dx / scale,
-            y: prev.y + dy / scale,
-        }));
+            // Update the reference point for the next movement
+            setLastMousePos({ x: e.clientX, y: e.clientY });
+            setHoverInfo(null);
+            return;
+        }
 
-        // Update the reference point for the next movement
-        setLastMousePos({ x: e.clientX, y: e.clientY });
+        if (quadtreeRef.current && baseQuadsRef.current) {
+            const cx = window.innerWidth / 2;
+            const cy = window.innerHeight / 2;
+
+            const worldPos = screenToPlotWorld(
+                e.clientX,
+                e.clientY,
+                cx,
+                cy,
+                translation,
+                scale
+            );
+
+            const hit = findQuadAt(
+                quadtreeRef.current,
+                baseQuadsRef.current,
+                worldPos.x,
+                worldPos.y
+            );
+
+            if (hit && hit.metadata) {
+                setHoverInfo({
+                    text: hit.metadata,
+                    x: e.clientX,
+                    y: e.clientY,
+                });
+            } else {
+                setHoverInfo(null);
+            }
+        }
+
     };
 
     // mouse dragging feature
@@ -612,6 +655,27 @@ const BarChart: React.FC = () => {
             )}
 
             {showShortcuts && <ShortcutsPanel />}
+
+            {hoverInfo && (
+                <div
+                    style={{
+                        position: "fixed",
+                        left: hoverInfo.x + 15,
+                        top: hoverInfo.y + 15,
+                        backgroundColor: "rgba(0, 0, 0, 0.85)",
+                        color: "white",
+                        padding: "8px 12px",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        pointerEvents: "none",
+                        zIndex: 1000,
+                        whiteSpace: "pre-wrap",
+                        border: "1px solid #00ffcc"
+                    }}
+                >
+                    {hoverInfo.text}
+                </div>
+            )}
         </div>
     );
 };
@@ -699,11 +763,11 @@ const ChartOverlays: React.FC<{
                         const p =
                             srcBBox != null
                                 ? mapPointBetweenBBoxes(
-                                      dataX,
-                                      dataY,
-                                      srcBBox,
-                                      destBBox,
-                                  )
+                                    dataX,
+                                    dataY,
+                                    srcBBox,
+                                    destBBox,
+                                )
                                 : { x: dataX, y: dataY };
                         worldX = p.x;
                         worldY = p.y;
@@ -725,16 +789,16 @@ const ChartOverlays: React.FC<{
                     const labelStyle: React.CSSProperties =
                         orientation === "vertical"
                             ? {
-                                  left: `${left}px`,
-                                  top: "auto",
-                                  bottom: `${labelBottomPx}px`,
-                                  transform: "translate(-50%, 0)",
-                              }
+                                left: `${left}px`,
+                                top: "auto",
+                                bottom: `${labelBottomPx}px`,
+                                transform: "translate(-50%, 0)",
+                            }
                             : {
-                                  left: `${left - 8}px`,
-                                  top: `${top}px`,
-                                  transform: "translate(-100%, -50%)",
-                              };
+                                left: `${left - 8}px`,
+                                top: `${top}px`,
+                                transform: "translate(-100%, -50%)",
+                            };
 
                     return (
                         <div key={i} className="label" style={labelStyle}>
@@ -774,71 +838,71 @@ const ControlPanel: React.FC<{
     orientation,
     setOrientation,
 }) => (
-    <div className="controls">
-        <input
-            type="file"
-            accept=".json"
-            multiple
-            onChange={handleFileUpload}
-        />
+        <div className="controls">
+            <input
+                type="file"
+                accept=".json"
+                multiple
+                onChange={handleFileUpload}
+            />
 
-        <button
-            onClick={() =>
-                setOrientation((prev) =>
-                    prev === "horizontal" ? "vertical" : "horizontal",
-                )
-            }
-            disabled={!hasValidData}
-        >
-            MODE: {orientation.toUpperCase()}
-        </button>
-        <button
-            onClick={() => setShowLegend(!showLegend)}
-            disabled={!hasValidData}
-            className={!hasValidData ? "disabled-button" : ""}
-        >
-            {showLegend ? "Hide Legend" : "Show Legend"}
-        </button>
+            <button
+                onClick={() =>
+                    setOrientation((prev) =>
+                        prev === "horizontal" ? "vertical" : "horizontal",
+                    )
+                }
+                disabled={!hasValidData}
+            >
+                MODE: {orientation.toUpperCase()}
+            </button>
+            <button
+                onClick={() => setShowLegend(!showLegend)}
+                disabled={!hasValidData}
+                className={!hasValidData ? "disabled-button" : ""}
+            >
+                {showLegend ? "Hide Legend" : "Show Legend"}
+            </button>
 
-        <div className="zoom-indicator">ZOOM: {scale.toFixed(2)}x</div>
+            <div className="zoom-indicator">ZOOM: {scale.toFixed(2)}x</div>
 
-        <div className="culling-indicator">
-            CULLING: {culling ? "ON" : "OFF"}
-        </div>
-
-        <button
-            onClick={() => {
-                if (bars.length === 0) return;
-
-                setScale(1);
-                setTranslation(translationToCenterPlotInWorld());
-            }}
-        >
-            Reset View
-        </button>
-
-        {showLegend && (
-            <div className="legend" style={{ display: "flex" }}>
-                {legend.map((item, i) => {
-                    const [r, g, b, a] = item.color.map((c, idx) =>
-                        idx < 3 ? Math.round(c * 255) : c,
-                    );
-                    return (
-                        <div key={i} className="legend-item">
-                            <div
-                                className="legend-color"
-                                style={{
-                                    backgroundColor: `rgba(${r}, ${g}, ${b}, ${a})`,
-                                }}
-                            />
-                            <span>{item.name}</span>
-                        </div>
-                    );
-                })}
+            <div className="culling-indicator">
+                CULLING: {culling ? "ON" : "OFF"}
             </div>
-        )}
-    </div>
-);
+
+            <button
+                onClick={() => {
+                    if (bars.length === 0) return;
+
+                    setScale(1);
+                    setTranslation(translationToCenterPlotInWorld());
+                }}
+            >
+                Reset View
+            </button>
+
+            {showLegend && (
+                <div className="legend" style={{ display: "flex" }}>
+                    {legend.map((item, i) => {
+                        const [r, g, b, a] = item.color.map((c, idx) =>
+                            idx < 3 ? Math.round(c * 255) : c,
+                        );
+                        return (
+                            <div key={i} className="legend-item">
+                                <div
+                                    className="legend-color"
+                                    style={{
+                                        backgroundColor: `rgba(${r}, ${g}, ${b}, ${a})`,
+                                    }}
+                                />
+                                <span>{item.name}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
 
 // shortcuts panel logic
 const ShortcutsPanel = () => (

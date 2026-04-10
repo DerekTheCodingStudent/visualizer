@@ -35,7 +35,7 @@ TARGET_SIZE_BYTES = int(args.mb * 1_000_000)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR = "data"
-OUTPUT_FILE = SCRIPT_DIR / DATA_DIR / f"large_chart_{args.mb}mb.json"
+OUTPUT_FILE = SCRIPT_DIR / DATA_DIR / f"large_chart_{args.mb}mWb.json"
 OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 # ---- Chart Template ----

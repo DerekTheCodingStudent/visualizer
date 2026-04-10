@@ -1,5 +1,5 @@
 import type { Rect, Quad } from "../types";
-import { rectIntersects, rectContains } from "./mathUtils";
+import { rectIntersects, rectContains, pointInRect } from "./mathUtils";
 
 // Quadtree node
 export class QuadNode {
@@ -149,4 +149,32 @@ export function queryVisibleIndices(
     visit(root);
     // Remove duplicates (just in case) and return
     return Array.from(new Set(out));
+}
+
+export function findQuadAt(
+    node: QuadNode,
+    baseQuads: Quad[],
+    px: number,
+    py: number
+): Quad | null {
+    // If point is not in this node's bounds, skip
+    if (!pointInRect(px, py, node.bounds)) return null;
+
+    // Check quads stored in this node
+    for (const idx of node.indices) {
+        const q = baseQuads[idx];
+        if (pointInRect(px, py, { x: q.x, y: q.y, w: q.w, h: q.h })) {
+            return q;
+        }
+    }
+
+    // Check children
+    if (node.children) {
+        for (const child of node.children) {
+            const found = findQuadAt(child, baseQuads, px, py);
+            if (found) return found;
+        }
+    }
+
+    return null;
 }

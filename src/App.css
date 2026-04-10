@@ -44,6 +44,7 @@ canvas {
     flex-direction: column;
     gap: 10px;
     z-index: 10;
+    color: #000000; 
 }
 
 .shortcuts-panel {
@@ -232,4 +233,8 @@ button:disabled {
     transform: translate(-100%, -50%) rotate(-90deg);
     transform-origin: center center;
     white-space: nowrap;
+}
+
+.chart-overlays {
+  color: black;
 }
