@@ -54,7 +54,7 @@ def build_record_pool(pool_size=20):
     for rid in range(pool_size):
         base_w = random.choice([68, 72, 76, 80, 84, 88, 92])
         base_h = random.randint(90, 220)
-        y = random.choice([40, 45, 50, 55, 60])
+        y = 0
         # Keep distribution broad so records are visually distinct.
         segment_values = [random.randint(8, 120) for _ in range(4)]
         records.append(
