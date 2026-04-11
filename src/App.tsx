@@ -134,6 +134,8 @@ const BarChart: React.FC = () => {
     const indexCountRef = useRef<number>(0);
     const borderVertexCountRef = useRef(0);
     const baseQuadsRef = useRef<Quad[]>([]);
+    /** Per quad index: first vertex in the bar VBO, or null if quad omitted (e.g. transparent). */
+    const quadVertexBaseRef = useRef<(number | null)[]>([]);
     const quadtreeRef = useRef<QuadNode | null>(null);
     const vertexCountRef = useRef(0);
 
@@ -228,12 +230,21 @@ const BarChart: React.FC = () => {
                 )
                 : baseQuads;
 
+        const quadVertexBase: (number | null)[] = [];
+
         plotQuads.forEach((q) => {
             const x1 = q.x;
             const x2 = q.x + q.w;
             const yBottom = q.y;
             const yTop = q.y + q.h;
             const color = q.color ?? [1, 1, 1, 1];
+
+            if (color[3] <= 1e-5) {
+                quadVertexBase.push(null);
+                return;
+            }
+
+            quadVertexBase.push(vertexData.length / 6);
 
             vertexData.push(
                 x1,
@@ -257,6 +268,7 @@ const BarChart: React.FC = () => {
             );
         });
 
+        quadVertexBaseRef.current = quadVertexBase;
         baseQuadsRef.current = plotQuads;
         quadtreeRef.current = buildQuadTree(plotQuads);
 
@@ -307,6 +319,7 @@ const BarChart: React.FC = () => {
             const gl = glRef.current;
             const indexBuffer = indexBufferRef.current;
             const baseQuads = baseQuadsRef.current;
+            const quadVertexBases = quadVertexBaseRef.current;
             const quadtree = quadtreeRef.current;
             const canvas = canvasRef.current;
 
@@ -325,7 +338,8 @@ const BarChart: React.FC = () => {
             const indexData: number[] = [];
 
             visibleQuadIndices.forEach((quadIndex) => {
-                const baseVertex = quadIndex * 6;
+                const baseVertex = quadVertexBases[quadIndex];
+                if (baseVertex == null) return;
 
                 indexData.push(
                     baseVertex + 0,
@@ -477,7 +491,7 @@ const BarChart: React.FC = () => {
 
             const zoomIntensity = 0.001;
             const delta = -e.deltaY * zoomIntensity;
-            const newScale = Math.max(0.1, Math.min(scale * (1 + delta), 20));
+            const newScale = Math.max(0.1, Math.min(scale * (1 + delta), 1000));
 
             const cx = window.innerWidth / 2;
             const cy = window.innerHeight / 2;
